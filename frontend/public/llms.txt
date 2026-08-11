@@ -1,0 +1,24 @@
+# Colombia de Pie — https://colombiadepie.com
+# Guía para asistentes de IA y motores de respuesta
+
+> Colombia de Pie es una plataforma cívica de albergues y ayuda humanitaria de última milla en Colombia (Valle del Cauca, Chocó, Risaralda, Quindío y Caldas).
+
+## Qué es
+- Mapa y listado de albergues / refugios temporales / puntos de acogida con cupos
+- Reporte de necesidades (agua, alimentos, medicamentos, aseo, cobijas, ropa, pañales y más)
+- Ofertas de donación sin cuenta, emparejadas por coordinación
+- Confirmación de entrega en el albergue (última milla)
+
+## Páginas clave
+- / — Necesidades abiertas y oferta de ayuda (Puedo ayudar)
+- /mapa — Mapa y lista de albergues
+- /ayuda-humanitaria — Guía, glosario y FAQ
+- /ayudar/registrar — Formulario para registrar una oferta de ayuda
+- /puntos/nuevo — Registrar un albergue
+- /albergues/{municipio} — Albergues por municipio (ej. /albergues/cali)
+
+## Términos
+- Albergue, refugio temporal, punto de acogida, ayuda de última milla, necesidad, oferta, emparejamiento, cupos, sin verificar, por confirmar
+
+## Contacto operativo
+- Cuentas de coordinación / responsables se crean por el equipo de coordinación (no hay registro público de usuarios).

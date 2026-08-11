@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Allow: /ayuda-humanitaria
+Allow: /mapa
+Allow: /puntos/nuevo
+Allow: /albergues/
+Disallow: /login
+Disallow: /coordinacion
+Disallow: /*/editar
+Disallow: /*/necesidades/
+
+Sitemap: https://colombiadepie.com/sitemap.xml

@@ -1,0 +1,71 @@
+service: colombiadepie-backend
+
+useDotenv: true
+
+package:
+  exclude:
+    - .env
+    - uploads/**
+    - README.md
+    - '**/*.md'
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+  profile: ${env:AWS_PROFILE}
+  timeout: 30
+  environment:
+    NODE_ENV: ${self:custom.environments.${self:provider.stage}.NODE_ENV}
+
+    # PostgreSQL — solo Neon en Lambda (desde .env local al deploy; no sube DB_*)
+    DATABASE_URL: ${self:custom.databaseUrl.${self:provider.stage}}
+
+    # Auth
+    JWT_SECRET: ${env:JWT_SECRET}
+    JWT_EXPIRES_IN: ${env:JWT_EXPIRES_IN, '12h'}
+
+functions:
+  app:
+    handler: bin/index.handler
+    events:
+      - http:
+          path: /
+          method: any
+      - http:
+          path: /{proxy+}
+          method: any
+
+custom:
+  databaseUrl:
+    dev: ${env:DATABASE_URL_DEV, ''}
+    staging: ${env:DATABASE_URL_STAGING, ''}
+    prod: ${env:DATABASE_URL_PROD, ''}
+
+  environments:
+    dev:
+      NODE_ENV: development
+      DOMAIN: ${env:DOMAIN_DEV, 'api-dev.colombiadepie.com'}
+    staging:
+      NODE_ENV: staging
+      DOMAIN: ${env:DOMAIN_STAGING, 'api-staging.colombiadepie.com'}
+    prod:
+      NODE_ENV: production
+      DOMAIN: ${env:DOMAIN_PROD, 'api.colombiadepie.com'}
+
+  customDomain:
+    domainName: ${self:custom.environments.${self:provider.stage}.DOMAIN}
+    basePath: ''
+    stage: ${self:provider.stage}
+    createRoute53Record: true
+    endpointType: regional
+    certificateArn: ${env:CERTIFICATE_ARN, ''}
+
+  serverless-offline:
+    httpPort: 3000
+    noPrependStageInUrl: true
+
+plugins:
+  - serverless-offline
+  - serverless-domain-manager
