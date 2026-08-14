@@ -32,3 +32,33 @@ export function saveDonorProfile(profile: DonorProfile): void {
     })
   );
 }
+
+/** Normaliza teléfono para agrupar aportes del mismo donante. */
+export function normalizeDonorContact(raw: string | null | undefined): string {
+  return String(raw || '').replace(/\D/g, '');
+}
+
+/** Clave estable por persona (teléfono > nombre > id de respaldo). */
+export function donorIdentityKey(
+  nombre: string | null | undefined,
+  contacto: string | null | undefined,
+  fallbackId?: string
+): string {
+  const contact = normalizeDonorContact(contacto);
+  if (contact.length >= 7) return `tel:${contact}`;
+  const name = String(nombre || '').trim().toLowerCase();
+  if (name) return `name:${name}`;
+  return fallbackId ? `id:${fallbackId}` : 'unknown';
+}
+
+export function ofertaDonorKey(oferta: {
+  id: string;
+  oferente_nombre: string;
+  oferente_contacto?: string | null;
+}): string {
+  return donorIdentityKey(
+    oferta.oferente_nombre,
+    oferta.oferente_contacto,
+    oferta.id
+  );
+}

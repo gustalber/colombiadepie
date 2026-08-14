@@ -63,6 +63,14 @@ export interface AuthResponse {
   user: Usuario;
 }
 
+export type TipoCuentaBancaria = 'ahorros' | 'corriente';
+
+export interface CuentaBancaria {
+  banco: string;
+  tipo_cuenta: TipoCuentaBancaria;
+  numero_cuenta: string;
+}
+
 export interface PuntoDemanda {
   id: string;
   nombre: string;
@@ -81,6 +89,7 @@ export interface PuntoDemanda {
   verificado_en?: string | null;
   actualizado_por?: string | null;
   censo_afectados_habilitado?: boolean;
+  cuentas_bancarias?: CuentaBancaria[];
   created_at: string;
   updated_at: string;
   sin_confirmar?: boolean;
@@ -110,6 +119,10 @@ export interface Necesidad {
     | 'municipio'
     | 'estado'
     | 'verificado'
+    | 'lat'
+    | 'lng'
+    | 'direccion'
+    | 'cuentas_bancarias'
     | 'responsable_nombre'
     | 'responsable_contacto'
   >;

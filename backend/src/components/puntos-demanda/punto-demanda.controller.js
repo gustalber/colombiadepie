@@ -9,6 +9,8 @@ const { isStaffRole } = require('../../utils/verification');
 
 const VALID_TIPOS = ['oficial', 'autogestionado', 'punto_comunitario'];
 const VALID_ESTADOS = ['activo', 'lleno', 'cerrado'];
+const VALID_TIPOS_CUENTA = ['ahorros', 'corriente'];
+const MAX_CUENTAS_BANCARIAS = 5;
 const DEDUP_DISTANCE_METERS = 150;
 
 class PuntoDemandaController {
@@ -281,7 +283,53 @@ class PuntoDemandaController {
       payload.censo_afectados_habilitado = !!body.censo_afectados_habilitado;
     }
 
+    if (body.cuentas_bancarias !== undefined) {
+      payload.cuentas_bancarias = this.#normalizeCuentasBancarias(
+        body.cuentas_bancarias
+      );
+    }
+
     return payload;
+  }
+
+  #normalizeCuentasBancarias(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .slice(0, MAX_CUENTAS_BANCARIAS)
+      .map((item) => ({
+        banco: String(item?.banco || '').trim(),
+        tipo_cuenta: String(item?.tipo_cuenta || '').trim().toLowerCase(),
+        numero_cuenta: String(item?.numero_cuenta || '')
+          .trim()
+          .replace(/\s/g, ''),
+      }))
+      .filter(
+        (item) => item.banco || item.tipo_cuenta || item.numero_cuenta
+      );
+  }
+
+  #validateCuentasBancarias(cuentas) {
+    if (!Array.isArray(cuentas)) {
+      return 'Las cuentas bancarias deben ser una lista';
+    }
+    if (cuentas.length > MAX_CUENTAS_BANCARIAS) {
+      return `Máximo ${MAX_CUENTAS_BANCARIAS} cuentas bancarias por albergue`;
+    }
+    for (const cuenta of cuentas) {
+      if (!cuenta.banco) {
+        return 'Cada cuenta debe indicar el banco';
+      }
+      if (!VALID_TIPOS_CUENTA.includes(cuenta.tipo_cuenta)) {
+        return `El tipo de cuenta debe ser: ${VALID_TIPOS_CUENTA.join(', ')}`;
+      }
+      if (!cuenta.numero_cuenta) {
+        return 'Cada cuenta debe indicar el número de cuenta';
+      }
+      if (!/^\d{6,20}$/.test(cuenta.numero_cuenta)) {
+        return 'El número de cuenta debe tener entre 6 y 20 dígitos';
+      }
+    }
+    return null;
   }
 
   #validateCreate(payload) {
@@ -311,6 +359,12 @@ class PuntoDemandaController {
     ) {
       return 'La ocupación actual no puede ser negativa';
     }
+    if (payload.cuentas_bancarias !== undefined) {
+      const cuentasError = this.#validateCuentasBancarias(
+        payload.cuentas_bancarias
+      );
+      if (cuentasError) return cuentasError;
+    }
     return null;
   }
 
@@ -326,6 +380,12 @@ class PuntoDemandaController {
     }
     if (payload.municipio !== undefined && !String(payload.municipio).trim()) {
       return 'El municipio no puede estar vacío';
+    }
+    if (payload.cuentas_bancarias !== undefined) {
+      const cuentasError = this.#validateCuentasBancarias(
+        payload.cuentas_bancarias
+      );
+      if (cuentasError) return cuentasError;
     }
     return null;
   }

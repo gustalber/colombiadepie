@@ -77,6 +77,11 @@ const PuntoDemanda = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    cuentas_bancarias: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: [],
+    },
   },
   {
     tableName: 'r_puntos_demanda',

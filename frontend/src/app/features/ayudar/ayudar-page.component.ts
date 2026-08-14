@@ -3,7 +3,8 @@ import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { NecesidadesApiService } from '../../core/api.services';
 import { MunicipioSelectComponent } from '../../core/components/municipio-select.component';
-import { CategoriaFamilia, Necesidad } from '../../core/models';
+import { DirectionsService } from '../../core/directions.service';
+import { CategoriaFamilia, CuentaBancaria, Necesidad } from '../../core/models';
 import {
   CATEGORIA_FAMILIA_LABELS,
   CATEGORIA_FAMILIA_ORDER,
@@ -19,6 +20,9 @@ interface ShelterNeedsGroup {
   puntoId: string;
   nombre: string;
   municipio: string;
+  lat: number | null;
+  lng: number | null;
+  cuentasBancarias: CuentaBancaria[];
   needs: Necesidad[];
 }
 
@@ -92,35 +96,53 @@ interface ShelterNeedsGroup {
             @for (group of groupedNeeds(); track group.puntoId) {
               <article class="ayudar-group panel">
                 <header class="ayudar-group-head">
-                  <div>
+                  <div class="ayudar-group-title">
                     <h3>
                       <a [routerLink]="['/puntos', group.puntoId]">{{ group.nombre }}</a>
                     </h3>
-                    <p class="ayudar-group-meta">{{ group.municipio }}</p>
+                    <p class="ayudar-group-meta">
+                      {{ group.municipio }}
+                      · {{ group.needs.length }}
+                      {{ group.needs.length === 1 ? 'necesidad' : 'necesidades' }}
+                    </p>
                   </div>
-                  <a class="btn btn-ghost btn-sm" [routerLink]="['/puntos', group.puntoId]">Ver albergue</a>
+                  <div class="ayudar-group-actions">
+                    <a class="btn btn-ghost btn-sm" [routerLink]="['/puntos', group.puntoId]">Ver albergue</a>
+                    @if (hasCoords(group)) {
+                      <button class="btn btn-ghost btn-sm" type="button" (click)="openDirections(group)">
+                        Cómo llegar
+                      </button>
+                    }
+                    @if (group.cuentasBancarias.length) {
+                      <button class="btn btn-ghost btn-sm" type="button" (click)="openBankAccounts(group)">
+                        Cuenta bancaria
+                      </button>
+                    }
+                  </div>
                 </header>
-                <ul class="ayudar-needs-list">
+                <ul class="ayudar-needs-grid">
                   @for (n of group.needs; track n.id) {
                     <li class="ayudar-need-item" [class.urgent]="n.urgencia === 'alta'">
-                      <div class="ayudar-need-row">
-                        <span class="ayudar-need-icon" aria-hidden="true">{{ categoriaIcon(n.categoria) }}</span>
-                        <div class="ayudar-need-body">
-                          <strong>{{ categoriaLabel(n.categoria) }}</strong>
-                          @if (needQty(n); as qty) {
-                            <span class="ayudar-need-qty">{{ qty }}</span>
-                          }
-                          @if (n.descripcion) {
-                            <span class="ayudar-need-desc">{{ n.descripcion }}</span>
-                          }
+                      <div class="ayudar-need-main">
+                        <div class="ayudar-need-row">
+                          <span class="ayudar-need-icon" aria-hidden="true">{{ categoriaIcon(n.categoria) }}</span>
+                          <div class="ayudar-need-body">
+                            <strong>{{ categoriaLabel(n.categoria) }}</strong>
+                            @if (needQty(n); as qty) {
+                              <span class="ayudar-need-qty">{{ qty }}</span>
+                            }
+                            @if (n.descripcion) {
+                              <span class="ayudar-need-desc">{{ n.descripcion }}</span>
+                            }
+                          </div>
+                          <span class="tag" [class]="n.urgencia">{{ urgenciaLabel(n.urgencia) }}</span>
                         </div>
-                        <span class="tag" [class]="n.urgencia">{{ urgenciaLabel(n.urgencia) }}</span>
+                        <app-quick-offer-panel
+                          [need]="n"
+                          [municipio]="group.municipio"
+                          [compact]="true"
+                        />
                       </div>
-                      <app-quick-offer-panel
-                        [need]="n"
-                        [municipio]="group.municipio"
-                        [compact]="true"
-                      />
                     </li>
                   }
                 </ul>
@@ -142,144 +164,45 @@ interface ShelterNeedsGroup {
           <a class="btn btn-secondary" routerLink="/ayuda-humanitaria">Cómo funciona</a>
         </div>
       </section>
+
+      @if (bankAccountsGroup(); as bankGroup) {
+        <div class="modal-backdrop" (click)="closeBankAccounts()">
+          <div class="modal-card bank-modal" (click)="$event.stopPropagation()">
+            <h3>Cuentas bancarias</h3>
+            <p class="bank-modal-intro">
+              Puedes transferir o consignar a <strong>{{ bankGroup.nombre }}</strong> ({{ bankGroup.municipio }}).
+            </p>
+            <ul class="public-bank-list">
+              @for (c of bankGroup.cuentasBancarias; track $index) {
+                <li class="public-bank-item">
+                  <strong>{{ c.banco }}</strong>
+                  <span>{{ tipoCuentaLabel(c.tipo_cuenta) }}</span>
+                  <code class="public-bank-number">{{ c.numero_cuenta }}</code>
+                </li>
+              }
+            </ul>
+            <div class="modal-actions">
+              <button class="btn btn-ghost" type="button" (click)="closeBankAccounts()">Cerrar</button>
+              <a class="btn btn-primary" [routerLink]="['/puntos', bankGroup.puntoId]">Ver albergue</a>
+            </div>
+          </div>
+        </div>
+      }
     </app-shell>
   `,
-  styles: [
-    `
-      .ayudar-filters {
-        margin-bottom: 1rem;
-      }
-      .ayudar-results {
-        margin-bottom: 1rem;
-      }
-      .ayudar-results-head h2 {
-        margin: 0 0 0.25rem;
-      }
-      .ayudar-results-head p {
-        margin: 0;
-        color: var(--ink-soft);
-      }
-      .ayudar-groups {
-        display: grid;
-        gap: 0.85rem;
-        margin-top: 0.85rem;
-      }
-      .ayudar-group {
-        padding: 0.85rem 1rem;
-        box-shadow: none;
-        border: 1px solid var(--line);
-      }
-      .ayudar-group-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 0.65rem;
-        margin-bottom: 0.65rem;
-      }
-      .ayudar-group-head h3 {
-        margin: 0 0 0.2rem;
-        font-size: 1.05rem;
-      }
-      .ayudar-group-meta {
-        margin: 0;
-        color: var(--ink-soft);
-        font-size: 0.9rem;
-      }
-      .ayudar-needs-list {
-        margin: 0;
-        padding: 0;
-        list-style: none;
-        display: grid;
-        gap: 0.55rem;
-      }
-      .ayudar-need-item {
-        display: flex;
-        flex-direction: column;
-        gap: 0.65rem;
-        padding: 0.65rem 0.75rem;
-        border-radius: var(--radius-sm);
-        background: #f7faf8;
-        border: 1px solid var(--line);
-      }
-      .ayudar-need-item.urgent {
-        border-color: #e8b4ae;
-        background: #fff8f7;
-      }
-      .ayudar-need-row {
-        display: grid;
-        grid-template-columns: auto 1fr auto;
-        gap: 0.65rem;
-        align-items: start;
-      }
-      .ayudar-need-item:has(.public-quick-offer),
-      .ayudar-need-item:has(.public-quick-offer-done) {
-        padding-bottom: 0.85rem;
-      }
-      .ayudar-need-icon {
-        font-size: 1.35rem;
-        line-height: 1;
-        margin-top: 0.1rem;
-      }
-      .ayudar-need-body {
-        display: grid;
-        gap: 0.15rem;
-        min-width: 0;
-      }
-      .ayudar-need-body strong {
-        color: var(--canopy-deep);
-      }
-      .ayudar-need-qty {
-        font-weight: 700;
-        color: var(--canopy-deep);
-      }
-      .ayudar-need-desc {
-        color: var(--ink-soft);
-        font-size: 0.9rem;
-        line-height: 1.4;
-      }
-      .ayudar-need-item .public-offer-btn--compact {
-        width: 100%;
-        margin-top: 0.15rem;
-      }
-      .ayudar-need-item .public-quick-offer {
-        margin-top: 0;
-      }
-      .ayudar-need-item .public-quick-offer-done {
-        margin-top: 0;
-      }
-      .ayudar-cta {
-        text-align: center;
-        border-color: var(--canopy);
-        background: #eef7f1;
-      }
-      .ayudar-cta h2 {
-        margin: 0 0 0.35rem;
-      }
-      .ayudar-cta p {
-        margin: 0 0 1rem;
-        color: var(--ink-soft);
-        max-width: 32rem;
-        margin-inline: auto;
-      }
-      .ayudar-cta-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.55rem;
-        justify-content: center;
-      }
-    `,
-  ],
 })
 export class AyudarPageComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly api = inject(NecesidadesApiService);
   private readonly route = inject(ActivatedRoute);
+  private readonly directions = inject(DirectionsService);
 
   readonly familias = CATEGORIA_FAMILIA_ORDER;
   readonly categoriaIcon = categoriaIcon;
   readonly loading = signal(false);
   readonly needs = signal<Necesidad[]>([]);
   readonly routeFamilia = signal<CategoriaFamilia | null>(null);
+  readonly bankAccountsGroup = signal<ShelterNeedsGroup | null>(null);
 
   readonly filters = this.fb.nonNullable.group({
     municipio: [''],
@@ -300,10 +223,14 @@ export class AyudarPageComponent implements OnInit {
     for (const n of this.filteredNeeds()) {
       const puntoId = n.punto?.id || n.punto_id;
       if (!map.has(puntoId)) {
+        const punto = n.punto;
         map.set(puntoId, {
           puntoId,
-          nombre: n.punto?.nombre || 'Albergue',
-          municipio: n.punto?.municipio || '',
+          nombre: punto?.nombre || 'Albergue',
+          municipio: punto?.municipio || '',
+          lat: this.toCoord(punto?.lat),
+          lng: this.toCoord(punto?.lng),
+          cuentasBancarias: punto?.cuentas_bancarias || [],
           needs: [],
         });
       }
@@ -328,7 +255,7 @@ export class AyudarPageComponent implements OnInit {
       case 'reconstruccion':
         return 'Mira qué materiales de obra hacen falta cerca de ti. Luego registra lo que puedes aportar.';
       case 'transporte':
-        return 'Mira dónde se necesita mover carga o personas. Luego registra tu vehículo o capacidad logística.';
+        return 'Mira dónde se necesita mover carga o personas. Luego registra tu capacidad logística.';
       default:
         return 'Primero mira qué hace falta en los albergues. Pulsa «Yo aporto» en lo que tengas o registra una oferta general.';
     }
@@ -386,6 +313,28 @@ export class AyudarPageComponent implements OnInit {
     return queryParams;
   }
 
+  hasCoords(group: ShelterNeedsGroup): boolean {
+    return group.lat != null && group.lng != null;
+  }
+
+  openDirections(group: ShelterNeedsGroup): void {
+    if (!this.hasCoords(group)) return;
+    this.directions.open({
+      lat: group.lat!,
+      lng: group.lng!,
+      name: group.nombre,
+    });
+  }
+
+  openBankAccounts(group: ShelterNeedsGroup): void {
+    if (!group.cuentasBancarias.length) return;
+    this.bankAccountsGroup.set(group);
+  }
+
+  closeBankAccounts(): void {
+    this.bankAccountsGroup.set(null);
+  }
+
   familiaLabel(fam: CategoriaFamilia): string {
     return CATEGORIA_FAMILIA_LABELS[fam];
   }
@@ -398,11 +347,21 @@ export class AyudarPageComponent implements OnInit {
     return URGENCIA_LABELS[v] ?? v;
   }
 
+  tipoCuentaLabel(v: string): string {
+    return v === 'corriente' ? 'Corriente' : 'Ahorros';
+  }
+
   needQty(n: Necesidad): string | null {
     if (n.cantidad == null) return null;
     if (n.cantidad_solicitada != null && n.cantidad_solicitada !== n.cantidad) {
       return `Faltan ${n.cantidad} de ${n.cantidad_solicitada} ${n.unidad || ''}`.trim();
     }
     return `${n.cantidad} ${n.unidad || ''}`.trim();
+  }
+
+  private toCoord(value: number | string | null | undefined): number | null {
+    if (value == null || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
   }
 }

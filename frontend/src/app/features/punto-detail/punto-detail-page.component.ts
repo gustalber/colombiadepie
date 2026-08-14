@@ -1,5 +1,6 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import {
+  FormArray,
   FormBuilder,
   ReactiveFormsModule,
   Validators,
@@ -14,6 +15,7 @@ import {
   UsuariosApiService,
 } from '../../core/api.services';
 import {
+  CuentaBancaria,
   Emparejamiento,
   Necesidad,
   Oferta,
@@ -42,12 +44,27 @@ import {
   ShareNeedBlock,
 } from '../../core/utils/instagram-share';
 import { environment } from '../../../environments/environment';
+import { ofertaDonorKey, donorIdentityKey } from '../../core/utils/donor-profile';
 
 interface OfferOpt {
   oferta: Oferta;
   item: OfertaItem;
   coversMunicipio: boolean;
   matchQty: number | null;
+}
+
+interface DonorGroup {
+  key: string;
+  oferta: Oferta;
+  items: OfferOpt[];
+  coversMunicipio: boolean;
+}
+
+interface DonorMatchGroup {
+  key: string;
+  nombre: string;
+  contacto: string | null;
+  matches: Emparejamiento[];
 }
 
 @Component({
@@ -169,6 +186,24 @@ interface OfferOpt {
                   </li>
                 </ol>
               </section>
+
+              @if (p.cuentas_bancarias?.length) {
+                <section class="public-bank panel">
+                  <h2>Transferencia bancaria</h2>
+                  <p class="public-bank-intro">
+                    También puedes apoyar a {{ p.nombre }} con una consignación o transferencia.
+                  </p>
+                  <ul class="public-bank-list">
+                    @for (c of p.cuentas_bancarias!; track $index) {
+                      <li class="public-bank-item">
+                        <strong>{{ c.banco }}</strong>
+                        <span>{{ tipoCuentaLabel(c.tipo_cuenta) }}</span>
+                        <code class="public-bank-number">{{ c.numero_cuenta }}</code>
+                      </li>
+                    }
+                  </ul>
+                </section>
+              }
             } @else {
               <section class="public-empty panel">
                 <span class="public-hero-badge">Pedido de ayuda</span>
@@ -184,6 +219,24 @@ interface OfferOpt {
                   ofrecer ayuda general para {{ p.municipio }}.
                 </p>
               </section>
+
+              @if (p.cuentas_bancarias?.length) {
+                <section class="public-bank panel">
+                  <h2>Transferencia bancaria</h2>
+                  <p class="public-bank-intro">
+                    También puedes apoyar a {{ p.nombre }} con una consignación o transferencia.
+                  </p>
+                  <ul class="public-bank-list">
+                    @for (c of p.cuentas_bancarias!; track $index) {
+                      <li class="public-bank-item">
+                        <strong>{{ c.banco }}</strong>
+                        <span>{{ tipoCuentaLabel(c.tipo_cuenta) }}</span>
+                        <code class="public-bank-number">{{ c.numero_cuenta }}</code>
+                      </li>
+                    }
+                  </ul>
+                </section>
+              }
             }
 
             <section class="public-cta panel">
@@ -291,6 +344,9 @@ interface OfferOpt {
             <a class="btn btn-secondary" [routerLink]="['/puntos', p.id, 'editar']">
               Actualizar datos
             </a>
+            <button class="btn btn-secondary" type="button" (click)="openBankAccountsModal()">
+              Cuentas bancarias
+            </button>
             @if (canAccessCenso()) {
               <a class="btn btn-secondary" [routerLink]="['/puntos', p.id, 'censo']">
                 Censo de afectados
@@ -434,45 +490,81 @@ interface OfferOpt {
             <div class="match-desk-head">
               <h2>Conseguir ayuda</h2>
               <p>
-                Conecta lo que te falta con aportes disponibles en
+                Personas que pueden aportar hacia tus necesidades en
                 <strong>{{ p.municipio }}</strong>.
               </p>
             </div>
 
             @if (openNeedsForMatch().length === 0) {
               <div class="empty">No tienes necesidades abiertas para emparejar.</div>
+            } @else if (donorGroups().length === 0) {
+              <div class="empty">
+                No hay aportes disponibles que coincidan con tus necesidades abiertas.
+              </div>
             } @else {
               <div class="match-step">
-                <div class="step-label">1 · ¿Qué categoría necesitas?</div>
-                <div class="chip-row">
-                  @for (c of categoriasPropias(); track c.value) {
+                <div class="step-label">
+                  1 · ¿Quién puede aportar?
+                  <span class="step-context">{{ donorGroups().length }} persona(s)</span>
+                </div>
+                <div class="pick-list donor-list">
+                  @for (g of donorGroups(); track g.key) {
                     <button
                       type="button"
-                      class="chip"
-                      [class.on]="filterCategoria() === c.value"
-                      (click)="onFilterCategoria(c.value)"
+                      class="pick donor-pick"
+                      [class.on]="selectedDonorKey() === g.key"
+                      [class.fit]="g.coversMunicipio"
+                      (click)="selectDonor(g)"
                     >
-                      {{ c.label }}
-                      <span class="chip-n need">{{ c.needs }}</span>
-                      @if (c.offers > 0) {
-                        <span class="chip-n offer">{{ c.offers }}</span>
+                      <div class="pick-top">
+                        @if (g.coversMunicipio) {
+                          <span class="tag ok">Sirve para {{ p.municipio }}</span>
+                        } @else {
+                          <span class="tag">Otra zona</span>
+                        }
+                        @if (selectedDonorKey() === g.key) {
+                          <span class="pick-check">Elegida</span>
+                        }
+                      </div>
+                      <strong>{{ g.oferta.oferente_nombre }}</strong>
+                      <ul class="donor-offer-lines">
+                        @for (opt of g.items; track opt.item.id) {
+                          <li>
+                            <span class="donor-offer-cat">{{ categoriaLabel(opt.item.categoria) }}</span>
+                            <span class="donor-offer-qty">
+                              @if (opt.item.cantidad != null) {
+                                {{ opt.item.cantidad }} {{ opt.item.unidad || '' }}
+                              } @else {
+                                Cantidad sin especificar
+                              }
+                            </span>
+                          </li>
+                        }
+                      </ul>
+                      @if (g.oferta.municipio_preferido) {
+                        <div class="pick-desc">
+                          Entrega: {{ g.oferta.municipio_preferido }}
+                        </div>
+                      }
+                      @if (g.oferta.oferente_contacto; as tel) {
+                        <a
+                          class="pick-call"
+                          [href]="telHref(tel)"
+                          (click)="$event.stopPropagation()"
+                        >
+                          Llamar · {{ tel }}
+                        </a>
                       }
                     </button>
                   }
                 </div>
-                <div class="chip-legend">
-                  <span><i class="dot need"></i> tus necesidades</span>
-                  <span><i class="dot offer"></i> aportes</span>
-                </div>
               </div>
 
-              @if (filterCategoria()) {
+              @if (selectedDonor(); as donor) {
                 <div class="match-step">
                   <div class="step-label">
-                    2 · Elige necesidad y aporte
-                    <span class="step-context">
-                      {{ categoriaLabel(filterCategoria()) }} · {{ p.municipio }}
-                    </span>
+                    2 · Elige qué conectar de {{ donor.oferta.oferente_nombre }}
+                    <span class="step-context">{{ p.municipio }}</span>
                   </div>
 
                   <div class="match-board">
@@ -513,8 +605,7 @@ interface OfferOpt {
                           </button>
                         } @empty {
                           <div class="empty tight">
-                            No hay necesidades abiertas de
-                            {{ categoriaLabel(filterCategoria()) }}.
+                            Esta persona no cubre ninguna de tus necesidades abiertas.
                           </div>
                         }
                       </div>
@@ -524,60 +615,48 @@ interface OfferOpt {
 
                     <div class="match-col">
                       <div class="col-head">
-                        <strong>Puede aportar</strong>
+                        <strong>Lo que aporta</strong>
                         <span>{{ matchingOffers().length }}</span>
                       </div>
                       <div class="pick-list">
-                        @for (opt of matchingOffers(); track opt.item.id) {
-                          <button
-                            type="button"
-                            class="pick"
-                            [class.on]="selectedItemId() === opt.item.id"
-                            [class.fit]="opt.coversMunicipio"
-                            (click)="selectOfferItem(opt)"
-                          >
-                            <div class="pick-top">
-                              @if (opt.coversMunicipio) {
-                                <span class="tag ok">Sirve para {{ p.municipio }}</span>
-                              } @else {
-                                <span class="tag">Otra zona</span>
-                              }
-                              @if (selectedItemId() === opt.item.id) {
-                                <span class="pick-check">Elegida</span>
-                              }
-                            </div>
-                            <strong>{{ opt.oferta.oferente_nombre }}</strong>
-                            <div class="pick-qty">
-                              @if (opt.matchQty != null) {
-                                {{ opt.matchQty }} {{ opt.item.unidad || '' }}
-                              } @else if (opt.item.cantidad != null) {
-                                {{ opt.item.cantidad }} {{ opt.item.unidad || '' }}
-                              } @else {
-                                Cantidad sin especificar
-                              }
-                            </div>
-                            @if (opt.item.descripcion) {
-                              <div class="pick-desc">{{ opt.item.descripcion }}</div>
-                            }
-                            @if (opt.oferta.municipio_preferido) {
-                              <div class="pick-desc">
-                                Entrega: {{ opt.oferta.municipio_preferido }}
-                              </div>
-                            }
-                            @if (opt.oferta.oferente_contacto; as tel) {
-                              <a
-                                class="pick-call"
-                                [href]="telHref(tel)"
-                                (click)="$event.stopPropagation()"
-                              >
-                                Llamar · {{ tel }}
-                              </a>
-                            }
-                          </button>
-                        } @empty {
+                        @if (matchingOffers().length === 0) {
                           <div class="empty tight">
-                            No hay aportes disponibles de
-                            {{ categoriaLabel(filterCategoria()) }}.
+                            @if (selectedNeed()) {
+                              No tiene aporte disponible para
+                              {{ categoriaLabel(selectedNeed()!.categoria) }}.
+                            } @else {
+                              Elige primero tu necesidad.
+                            }
+                          </div>
+                        } @else {
+                          <div class="pick donor-items-card">
+                            @for (opt of matchingOffers(); track opt.item.id) {
+                              <button
+                                type="button"
+                                class="donor-item-row"
+                                [class.on]="selectedItemId() === opt.item.id"
+                                (click)="selectOfferItem(opt)"
+                              >
+                                <div class="donor-item-main">
+                                  <strong>{{ categoriaLabel(opt.item.categoria) }}</strong>
+                                  <span class="donor-item-qty">
+                                    @if (opt.matchQty != null) {
+                                      {{ opt.matchQty }} {{ opt.item.unidad || '' }}
+                                    } @else if (opt.item.cantidad != null) {
+                                      {{ opt.item.cantidad }} {{ opt.item.unidad || '' }}
+                                    } @else {
+                                      Cantidad sin especificar
+                                    }
+                                  </span>
+                                </div>
+                                @if (opt.item.descripcion) {
+                                  <div class="pick-desc">{{ opt.item.descripcion }}</div>
+                                }
+                                @if (selectedItemId() === opt.item.id) {
+                                  <span class="pick-check">Elegido</span>
+                                }
+                              </button>
+                            }
                           </div>
                         }
                       </div>
@@ -635,10 +714,16 @@ interface OfferOpt {
             <div class="ops-block-head">
               <div>
                 <h2>Por recibir</h2>
-                <p>Ayuda emparejada hacia este albergue.</p>
+                <p>
+                  Ayuda emparejada hacia este albergue
+                  @if (incomingHelp().length > 0) {
+                    · {{ incomingByDonor().length }} persona(s),
+                    {{ incomingHelp().length }} aporte(s)
+                  }
+                </p>
               </div>
-              @if (incomingHelp().length > 0) {
-                <span class="ops-count">{{ incomingHelp().length }}</span>
+              @if (incomingByDonor().length > 0) {
+                <span class="ops-count">{{ incomingByDonor().length }}</span>
               }
             </div>
 
@@ -646,48 +731,56 @@ interface OfferOpt {
               <p class="ops-quiet">No hay nada en camino ahora.</p>
             } @else {
               <div class="ops-stack">
-                @for (m of incomingHelp(); track m.id) {
-                  <article class="ops-arrival" [class.ready]="m.estado === 'en_camino'">
-                    <div class="ops-arrival-body">
-                      <div class="ops-arrival-top">
-                        <span class="tag" [class]="m.estado === 'en_camino' ? 'media' : ''">
-                          {{ matchEstadoLabel(m.estado) }}
-                        </span>
-                        <span class="ops-arrival-cat">{{ categoriaLabel(m.necesidad?.categoria || '') }}</span>
-                      </div>
-                      <strong>{{ m.oferta?.oferente_nombre || 'Ayuda emparejada' }}</strong>
-                      <div class="ops-row-meta">
-                        @if (matchQtyLabel(m); as qty) {
-                          {{ qty }}
-                        }
-                        @if (m.eta) {
-                          · Llega: {{ m.eta }}
-                        }
-                      </div>
+                @for (g of incomingByDonor(); track g.key) {
+                  <article class="ops-donor-group">
+                    <div class="ops-donor-head">
+                      <strong>{{ g.nombre }}</strong>
+                      @if (g.contacto; as tel) {
+                        <a class="btn btn-ghost btn-sm" [href]="telHref(tel)">Llamar</a>
+                      }
                     </div>
-                    @if (canConfirmDelivery() && m.estado === 'en_camino') {
-                      <button
-                        class="btn btn-primary"
-                        type="button"
-                        [disabled]="busyMatch() === m.id"
-                        (click)="askConfirmDelivery(m)"
-                      >
-                        Ya llegó
-                      </button>
-                    }
-                    @if (canAdvanceToEnCamino() && (m.estado === 'propuesto' || m.estado === 'confirmado')) {
-                      <button
-                        class="btn btn-secondary"
-                        type="button"
-                        [disabled]="busyMatch() === m.id"
-                        (click)="markEnCamino(m)"
-                      >
-                        Ya va en camino
-                      </button>
-                    }
-                    @if (m.oferta?.oferente_contacto; as tel) {
-                      <a class="btn btn-ghost" [href]="telHref(tel)">Llamar</a>
-                    }
+                    <div class="ops-donor-items">
+                      @for (m of g.matches; track m.id) {
+                        <article class="ops-arrival ops-arrival-nested" [class.ready]="m.estado === 'en_camino'">
+                          <div class="ops-arrival-body">
+                            <div class="ops-arrival-top">
+                              <span class="tag" [class]="m.estado === 'en_camino' ? 'media' : ''">
+                                {{ matchEstadoLabel(m.estado) }}
+                              </span>
+                              <span class="ops-arrival-cat">{{ categoriaLabel(m.necesidad?.categoria || '') }}</span>
+                            </div>
+                            <div class="ops-row-meta">
+                              @if (matchQtyLabel(m); as qty) {
+                                {{ qty }}
+                              }
+                              @if (m.eta) {
+                                · Llega: {{ m.eta }}
+                              }
+                            </div>
+                          </div>
+                          @if (canConfirmDelivery() && m.estado === 'en_camino') {
+                            <button
+                              class="btn btn-primary btn-sm"
+                              type="button"
+                              [disabled]="busyMatch() === m.id"
+                              (click)="askConfirmDelivery(m)"
+                            >
+                              Ya llegó
+                            </button>
+                          }
+                          @if (canAdvanceToEnCamino() && (m.estado === 'propuesto' || m.estado === 'confirmado')) {
+                            <button
+                              class="btn btn-secondary btn-sm"
+                              type="button"
+                              [disabled]="busyMatch() === m.id"
+                              (click)="markEnCamino(m)"
+                            >
+                              Ya va en camino
+                            </button>
+                          }
+                        </article>
+                      }
+                    </div>
                   </article>
                 }
               </div>
@@ -831,30 +924,39 @@ interface OfferOpt {
               }
             </summary>
             <div class="ops-stack" style="margin-top: 0.75rem">
-              @for (m of matchHistory(); track m.id) {
-                <div class="ops-history-row">
-                  <div>
-                    <strong>{{ m.oferta?.oferente_nombre || 'Ayuda' }}</strong>
-                    <div class="ops-row-meta">
-                      {{ categoriaLabel(m.necesidad?.categoria || '') }}
-                      @if (matchQtyLabel(m); as qty) {
-                        · {{ qty }}
-                      }
-                      · {{ timeAgo(m.updated_at) }}
-                    </div>
-                    @if (m.evidencias?.length) {
-                      <div class="evidence-grid compact">
-                        @for (ev of m.evidencias!; track ev.url) {
-                          <a class="evidence-thumb" [href]="mediaUrl(ev.url)" target="_blank" rel="noopener">
-                            <img [src]="mediaUrl(ev.url)" alt="Evidencia de entrega" />
-                          </a>
-                        }
+              @for (g of historyByDonor(); track g.key) {
+                <div class="ops-donor-group ops-donor-group-history">
+                  <div class="ops-donor-head">
+                    <strong>{{ g.nombre }}</strong>
+                    <span class="ops-row-meta">{{ g.matches.length }} aporte(s)</span>
+                  </div>
+                  <div class="ops-donor-items">
+                    @for (m of g.matches; track m.id) {
+                      <div class="ops-history-row ops-history-row-nested">
+                        <div>
+                          <div class="ops-row-meta">
+                            <strong>{{ categoriaLabel(m.necesidad?.categoria || '') }}</strong>
+                            @if (matchQtyLabel(m); as qty) {
+                              · {{ qty }}
+                            }
+                            · {{ timeAgo(m.updated_at) }}
+                          </div>
+                          @if (m.evidencias?.length) {
+                            <div class="evidence-grid compact">
+                              @for (ev of m.evidencias!; track ev.url) {
+                                <a class="evidence-thumb" [href]="mediaUrl(ev.url)" target="_blank" rel="noopener">
+                                  <img [src]="mediaUrl(ev.url)" alt="Evidencia de entrega" />
+                                </a>
+                              }
+                            </div>
+                          }
+                        </div>
+                        <span class="tag" [class]="matchHistoryTag(m.estado)">
+                          {{ matchEstadoLabel(m.estado) }}
+                        </span>
                       </div>
                     }
                   </div>
-                  <span class="tag" [class]="matchHistoryTag(m.estado)">
-                    {{ matchEstadoLabel(m.estado) }}
-                  </span>
                 </div>
               } @empty {
                 <p class="ops-quiet">Aún no hay entregas ni cancelaciones.</p>
@@ -872,6 +974,20 @@ interface OfferOpt {
               <div><span>Contacto</span><strong>{{ p.responsable_contacto }}</strong></div>
             }
             <div><span>Actualizado</span><strong>{{ timeAgo(p.updated_at) }}</strong></div>
+            @if (p.cuentas_bancarias?.length) {
+              <div class="ops-bank-block">
+                <span>Cuentas bancarias</span>
+                <ul class="ops-bank-list">
+                  @for (c of p.cuentas_bancarias!; track $index) {
+                    <li>
+                      <strong>{{ c.banco }}</strong>
+                      · {{ tipoCuentaLabel(c.tipo_cuenta) }}
+                      · {{ c.numero_cuenta }}
+                    </li>
+                  }
+                </ul>
+              </div>
+            }
           </div>
         </details>
         }
@@ -927,6 +1043,92 @@ interface OfferOpt {
                   {{ busyMatch() === pending.id ? 'Confirmando…' : 'Sí, ya llegó' }}
                 </button>
               </div>
+            </div>
+          </div>
+        }
+
+        @if (bankAccountsOpen()) {
+          <div class="modal-backdrop" (click)="closeBankAccountsModal()">
+            <div class="modal-card bank-modal" (click)="$event.stopPropagation()">
+              <h3>Cuentas bancarias</h3>
+              <p class="bank-modal-intro">
+                Publica las cuentas donde pueden consignar o transferir. Los donantes las verán en la ficha del albergue.
+              </p>
+
+              <form [formGroup]="bankAccountsForm" (ngSubmit)="saveBankAccounts()">
+                <div formArrayName="cuentas" class="bank-rows">
+                  @for (row of bankAccountRows.controls; track $index; let i = $index) {
+                    <fieldset class="bank-row" [formGroupName]="i">
+                      <legend>Cuenta {{ i + 1 }}</legend>
+                      <div class="field">
+                        <label [attr.for]="'bank-banco-' + i">Banco *</label>
+                        <input
+                          [id]="'bank-banco-' + i"
+                          formControlName="banco"
+                          placeholder="Ej. Bancolombia"
+                          [disabled]="busyBankAccounts()"
+                        />
+                      </div>
+                      <div class="field">
+                        <label [attr.for]="'bank-tipo-' + i">Tipo de cuenta *</label>
+                        <select [id]="'bank-tipo-' + i" formControlName="tipo_cuenta" [disabled]="busyBankAccounts()">
+                          <option value="ahorros">Ahorros</option>
+                          <option value="corriente">Corriente</option>
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label [attr.for]="'bank-numero-' + i">Número de cuenta *</label>
+                        <input
+                          [id]="'bank-numero-' + i"
+                          formControlName="numero_cuenta"
+                          inputmode="numeric"
+                          autocomplete="off"
+                          placeholder="Solo dígitos"
+                          [disabled]="busyBankAccounts()"
+                        />
+                      </div>
+                      @if (bankAccountRows.length > 1) {
+                        <button
+                          class="btn btn-ghost btn-sm bank-remove"
+                          type="button"
+                          [disabled]="busyBankAccounts()"
+                          (click)="removeBankAccountRow(i)"
+                        >
+                          Quitar cuenta
+                        </button>
+                      }
+                    </fieldset>
+                  }
+                </div>
+
+                @if (bankAccountRows.length < 5) {
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    type="button"
+                    [disabled]="busyBankAccounts()"
+                    (click)="addBankAccountRow()"
+                  >
+                    + Agregar otra cuenta
+                  </button>
+                }
+
+                <div class="modal-actions">
+                  <button
+                    class="btn btn-ghost"
+                    type="button"
+                    [disabled]="busyBankAccounts()"
+                    (click)="clearBankAccounts()"
+                  >
+                    Quitar todas
+                  </button>
+                  <button class="btn btn-ghost" type="button" (click)="closeBankAccountsModal()" [disabled]="busyBankAccounts()">
+                    Cancelar
+                  </button>
+                  <button class="btn btn-primary" type="submit" [disabled]="busyBankAccounts()">
+                    {{ busyBankAccounts() ? 'Guardando…' : 'Guardar cuentas' }}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         }
@@ -1250,6 +1452,124 @@ interface OfferOpt {
         gap: 0.4rem;
         margin-top: 0.45rem;
       }
+      .donor-list {
+        padding: 0;
+        max-height: none;
+      }
+      .donor-pick .donor-offer-lines {
+        list-style: none;
+        margin: 0.35rem 0 0;
+        padding: 0;
+        display: grid;
+        gap: 0.25rem;
+      }
+      .donor-offer-lines li {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 0.35rem;
+        font-size: 0.88rem;
+      }
+      .donor-offer-cat {
+        font-weight: 700;
+        color: var(--canopy-deep);
+      }
+      .donor-offer-qty {
+        color: var(--ink-soft);
+      }
+      .donor-items-card {
+        cursor: default;
+        padding: 0.35rem;
+        gap: 0;
+      }
+      .donor-items-card:hover {
+        border-color: var(--line);
+      }
+      .donor-item-row {
+        width: 100%;
+        text-align: left;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        padding: 0.55rem 0.6rem;
+        cursor: pointer;
+        font: inherit;
+        color: inherit;
+        display: grid;
+        gap: 0.15rem;
+      }
+      .donor-item-row:hover {
+        background: color-mix(in srgb, var(--canopy) 6%, #fff);
+      }
+      .donor-item-row.on {
+        background: color-mix(in srgb, var(--canopy) 10%, #fff);
+        box-shadow: inset 0 0 0 1px var(--canopy);
+      }
+      .donor-item-main {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 0.35rem;
+        align-items: baseline;
+      }
+      .donor-item-qty {
+        font-weight: 700;
+        color: var(--canopy-deep);
+      }
+      .ops-donor-group {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #fbfcfb;
+        overflow: hidden;
+      }
+      .ops-donor-group-history {
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        border-top: 1px solid var(--line);
+        padding-top: 0.65rem;
+      }
+      .ops-donor-group-history:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      .ops-donor-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding: 0.75rem 0.85rem;
+        background: #fff;
+        border-bottom: 1px solid var(--line);
+      }
+      .ops-donor-group-history .ops-donor-head {
+        padding: 0 0 0.35rem;
+        background: transparent;
+        border-bottom: 0;
+      }
+      .ops-donor-items {
+        display: grid;
+        gap: 0;
+      }
+      .ops-arrival-nested {
+        border-top: 1px solid var(--line);
+        margin: 0;
+        padding: 0.75rem 0.85rem;
+        border-radius: 0;
+      }
+      .ops-arrival-nested:first-child {
+        border-top: 0;
+      }
+      .ops-history-row-nested {
+        border-top: 1px solid var(--line);
+        padding: 0.55rem 0;
+        margin: 0;
+      }
+      .ops-history-row-nested:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
       .ops-arrival {
         align-items: flex-start;
       }
@@ -1328,7 +1648,7 @@ export class PuntoDetailPageComponent implements OnInit {
   readonly incomingHelp = signal<Emparejamiento[]>([]);
   readonly matchHistory = signal<Emparejamiento[]>([]);
   readonly availableOfertas = signal<Oferta[]>([]);
-  readonly filterCategoria = signal('');
+  readonly selectedDonorKey = signal('');
   readonly selectedNeedId = signal('');
   readonly selectedItemId = signal('');
   readonly pendingDelivery = signal<Emparejamiento | null>(null);
@@ -1355,6 +1675,12 @@ export class PuntoDetailPageComponent implements OnInit {
   readonly instagramShareNeeds = signal<ShareNeedBlock[]>([]);
   readonly sharePickMode = signal(false);
   readonly shareSelectedIds = signal<Set<string>>(new Set());
+  readonly bankAccountsOpen = signal(false);
+  readonly busyBankAccounts = signal(false);
+
+  readonly bankAccountsForm = this.fb.nonNullable.group({
+    cuentas: this.fb.nonNullable.array([] as ReturnType<typeof this.buildBankAccountGroup>[]),
+  });
 
   readonly timeAgo = timeAgo;
 
@@ -1390,73 +1716,104 @@ export class PuntoDetailPageComponent implements OnInit {
     )
   );
 
-  readonly categoriasPropias = computed(() => {
+  readonly donorGroups = computed(() => {
+    const p = this.punto();
     const needs = this.openNeedsForMatch();
-    const needCounts = new Map<string, number>();
-    for (const n of needs) {
-      needCounts.set(n.categoria, (needCounts.get(n.categoria) || 0) + 1);
-    }
+    if (!p || needs.length === 0) return [] as DonorGroup[];
 
-    const offerCounts = new Map<string, number>();
+    const needCategories = new Set(needs.map((n) => n.categoria));
+    const byKey = new Map<string, DonorGroup>();
+
     for (const o of this.availableOfertas()) {
+      const items: OfferOpt[] = [];
       for (const item of o.items || []) {
         if (item.estado !== 'disponible') continue;
         if (item.cantidad != null && Number(item.cantidad) <= 0) continue;
-        offerCounts.set(
-          item.categoria,
-          (offerCounts.get(item.categoria) || 0) + 1
-        );
+        if (!needCategories.has(item.categoria)) continue;
+        items.push({
+          oferta: o,
+          item,
+          coversMunicipio: this.offerCoversMunicipio(o, p.municipio),
+          matchQty: null,
+        });
       }
+      if (items.length === 0) continue;
+
+      const key = ofertaDonorKey(o);
+      const covers = items.some((i) => i.coversMunicipio);
+      const existing = byKey.get(key);
+      if (existing) {
+        const seen = new Set(existing.items.map((i) => i.item.id));
+        for (const opt of items) {
+          if (seen.has(opt.item.id)) continue;
+          seen.add(opt.item.id);
+          existing.items.push(opt);
+        }
+        existing.coversMunicipio = existing.coversMunicipio || covers;
+        continue;
+      }
+
+      byKey.set(key, {
+        key,
+        oferta: o,
+        items,
+        coversMunicipio: covers,
+      });
     }
 
-    return [...needCounts.keys()]
-      .map((value) => ({
-        value,
-        label: CATEGORIA_LABELS[value] ?? value,
-        needs: needCounts.get(value) || 0,
-        offers: offerCounts.get(value) || 0,
-      }))
-      .sort((a, b) => {
-        if (b.needs !== a.needs) return b.needs - a.needs;
-        return a.label.localeCompare(b.label, 'es');
-      });
+    return [...byKey.values()].sort((a, b) => {
+      if (Number(b.coversMunicipio) !== Number(a.coversMunicipio)) {
+        return Number(b.coversMunicipio) - Number(a.coversMunicipio);
+      }
+      return a.oferta.oferente_nombre.localeCompare(b.oferta.oferente_nombre, 'es');
+    });
   });
 
+  readonly selectedDonor = computed(() => {
+    const key = this.selectedDonorKey();
+    if (!key) return null;
+    return this.donorGroups().find((g) => g.key === key) || null;
+  });
+
+  readonly incomingByDonor = computed(() =>
+    groupMatchesByDonor(this.incomingHelp())
+  );
+
+  readonly historyByDonor = computed(() =>
+    groupMatchesByDonor(this.matchHistory())
+  );
+
   readonly filteredOwnNeeds = computed(() => {
-    const cat = this.filterCategoria();
-    if (!cat) return [];
-    return this.openNeedsForMatch().filter((n) => n.categoria === cat);
+    const donor = this.selectedDonor();
+    if (!donor) return [];
+    const donorCategories = new Set(donor.items.map((i) => i.item.categoria));
+    return this.openNeedsForMatch().filter((n) => donorCategories.has(n.categoria));
   });
 
   readonly selectedNeed = computed(() => {
     const id = this.selectedNeedId();
     if (!id) return null;
-    return this.openNeedsForMatch().find((n) => n.id === id) || null;
+    return this.filteredOwnNeeds().find((n) => n.id === id) || null;
   });
 
   readonly matchingOffers = computed(() => {
+    const donor = this.selectedDonor();
     const need = this.selectedNeed();
-    const cat = this.filterCategoria();
-    const p = this.punto();
-    if (!p || !cat) return [] as OfferOpt[];
+    if (!donor) return [] as OfferOpt[];
 
-    const out: OfferOpt[] = [];
-    for (const o of this.availableOfertas()) {
-      for (const item of o.items || []) {
-        if (item.estado !== 'disponible') continue;
-        if (item.categoria !== cat) continue;
-        if (item.cantidad != null && Number(item.cantidad) <= 0) continue;
-        out.push({
-          oferta: o,
-          item,
-          coversMunicipio: this.offerCoversMunicipio(o, p.municipio),
-          matchQty: this.resolveMatchQty(need?.cantidad, item.cantidad),
-        });
-      }
-    }
-    return out.sort(
-      (a, b) => Number(b.coversMunicipio) - Number(a.coversMunicipio)
-    );
+    return donor.items
+      .filter((opt) => !need || opt.item.categoria === need.categoria)
+      .map((opt) => ({
+        ...opt,
+        matchQty: this.resolveMatchQty(need?.cantidad, opt.item.cantidad),
+      }))
+      .sort((a, b) => {
+        if (need) return 0;
+        return this.categoriaLabel(a.item.categoria).localeCompare(
+          this.categoriaLabel(b.item.categoria),
+          'es'
+        );
+      });
   });
 
   readonly selectionSummary = computed(() => {
@@ -1489,6 +1846,10 @@ export class PuntoDetailPageComponent implements OnInit {
     email: ['', [Validators.required, Validators.email]],
   });
 
+  get bankAccountRows(): FormArray {
+    return this.bankAccountsForm.get('cuentas') as FormArray;
+  }
+
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id');
     if (!id) {
@@ -1514,20 +1875,6 @@ export class PuntoDetailPageComponent implements OnInit {
         }
         if (this.canSelfMatch()) {
           this.loadOfertas();
-          const needs = (p.necesidades || []).filter(
-            (n) => n.estado === 'abierta' && (n.cantidad == null || Number(n.cantidad) > 0)
-          );
-          const cats = [...new Set(needs.map((n) => n.categoria))];
-          if (!this.filterCategoria() && cats.length === 1) {
-            this.onFilterCategoria(cats[0]);
-          } else if (
-            this.filterCategoria() &&
-            !cats.includes(this.filterCategoria() as never)
-          ) {
-            this.filterCategoria.set('');
-            this.selectedNeedId.set('');
-            this.selectedItemId.set('');
-          }
         }
       },
       error: () => {
@@ -1833,13 +2180,25 @@ export class PuntoDetailPageComponent implements OnInit {
 
   loadOfertas(): void {
     this.ofertasApi.list({ estado: 'disponible' }).subscribe({
-      next: (res) => this.availableOfertas.set(res.data),
+      next: (res) => {
+        this.availableOfertas.set(res.data);
+        if (
+          this.selectedDonorKey() &&
+          !this.donorGroups().some((g) => g.key === this.selectedDonorKey())
+        ) {
+          this.selectedDonorKey.set('');
+          this.selectedNeedId.set('');
+          this.selectedItemId.set('');
+        } else if (!this.selectedDonorKey() && this.donorGroups().length === 1) {
+          this.selectDonor(this.donorGroups()[0]);
+        }
+      },
       error: () => this.availableOfertas.set([]),
     });
   }
 
-  onFilterCategoria(value: string): void {
-    this.filterCategoria.set(value);
+  selectDonor(group: DonorGroup): void {
+    this.selectedDonorKey.set(group.key);
     this.selectedNeedId.set('');
     this.selectedItemId.set('');
     queueMicrotask(() => this.autoSelectIfSingle());
@@ -1889,6 +2248,102 @@ export class PuntoDetailPageComponent implements OnInit {
     }
     const digits = trimmed.replace(/[^\d+]/g, '');
     return digits ? `tel:${digits}` : '#';
+  }
+
+  private buildBankAccountGroup(data?: CuentaBancaria) {
+    return this.fb.nonNullable.group({
+      banco: [data?.banco || '', Validators.required],
+      tipo_cuenta: [data?.tipo_cuenta || 'ahorros', Validators.required],
+      numero_cuenta: [
+        data?.numero_cuenta || '',
+        [Validators.required, Validators.pattern(/^\d{6,20}$/)],
+      ],
+    });
+  }
+
+  openBankAccountsModal(): void {
+    this.bankAccountRows.clear();
+    const existing = this.punto()?.cuentas_bancarias || [];
+    if (existing.length === 0) {
+      this.bankAccountRows.push(this.buildBankAccountGroup());
+    } else {
+      for (const cuenta of existing) {
+        this.bankAccountRows.push(this.buildBankAccountGroup(cuenta));
+      }
+    }
+    this.bankAccountsOpen.set(true);
+  }
+
+  closeBankAccountsModal(): void {
+    if (this.busyBankAccounts()) return;
+    this.bankAccountsOpen.set(false);
+  }
+
+  addBankAccountRow(): void {
+    if (this.bankAccountRows.length >= 5) return;
+    this.bankAccountRows.push(this.buildBankAccountGroup());
+  }
+
+  removeBankAccountRow(index: number): void {
+    this.bankAccountRows.removeAt(index);
+  }
+
+  clearBankAccounts(): void {
+    const p = this.punto();
+    if (!p) return;
+    this.busyBankAccounts.set(true);
+    this.puntosApi.update(p.id, { cuentas_bancarias: [] }).subscribe({
+      next: (updated) => {
+        this.busyBankAccounts.set(false);
+        this.bankAccountsOpen.set(false);
+        this.punto.set(updated);
+        this.actionIsError.set(false);
+        this.actionMessage.set('Se quitaron las cuentas bancarias del albergue.');
+      },
+      error: (err) => {
+        this.busyBankAccounts.set(false);
+        this.actionIsError.set(true);
+        this.actionMessage.set(err?.error?.error || 'No se pudieron quitar las cuentas.');
+      },
+    });
+  }
+
+  saveBankAccounts(): void {
+    if (this.bankAccountsForm.invalid) {
+      this.bankAccountsForm.markAllAsTouched();
+      this.actionIsError.set(true);
+      this.actionMessage.set('Revisa banco, tipo y número de cada cuenta (6–20 dígitos).');
+      return;
+    }
+
+    const p = this.punto();
+    if (!p) return;
+
+    const cuentas = this.bankAccountRows.getRawValue().map((row) => ({
+      banco: row.banco.trim(),
+      tipo_cuenta: row.tipo_cuenta as CuentaBancaria['tipo_cuenta'],
+      numero_cuenta: row.numero_cuenta.trim().replace(/\s/g, ''),
+    }));
+
+    this.busyBankAccounts.set(true);
+    this.puntosApi.update(p.id, { cuentas_bancarias: cuentas }).subscribe({
+      next: (updated) => {
+        this.busyBankAccounts.set(false);
+        this.bankAccountsOpen.set(false);
+        this.punto.set(updated);
+        this.actionIsError.set(false);
+        this.actionMessage.set(
+          cuentas.length
+            ? 'Cuentas bancarias guardadas. Ya son visibles para quien quiera donar.'
+            : 'Se quitaron las cuentas bancarias del albergue.'
+        );
+      },
+      error: (err) => {
+        this.busyBankAccounts.set(false);
+        this.actionIsError.set(true);
+        this.actionMessage.set(err?.error?.error || 'No se pudieron guardar las cuentas.');
+      },
+    });
   }
 
   confirmSelfMatch(): void {
@@ -2146,6 +2601,9 @@ export class PuntoDetailPageComponent implements OnInit {
   tipoLabel(v: string): string {
     return TIPO_PUNTO_LABELS[v] ?? v;
   }
+  tipoCuentaLabel(v: string): string {
+    return v === 'corriente' ? 'Corriente' : 'Ahorros';
+  }
   categoriaLabel(v: string): string {
     return CATEGORIA_LABELS[v] ?? v;
   }
@@ -2156,4 +2614,30 @@ export class PuntoDetailPageComponent implements OnInit {
   matchEstadoLabel(v: string): string {
     return ESTADO_EMPAREJAMIENTO_LABELS[v] ?? v;
   }
+}
+
+function groupMatchesByDonor(matches: Emparejamiento[]): DonorMatchGroup[] {
+  const map = new Map<string, DonorMatchGroup>();
+  for (const m of matches) {
+    const key = m.oferta
+      ? ofertaDonorKey(m.oferta)
+      : donorIdentityKey(null, null, m.oferta_id || m.id);
+    const existing = map.get(key);
+    if (existing) {
+      existing.matches.push(m);
+      if (!existing.contacto && m.oferta?.oferente_contacto) {
+        existing.contacto = m.oferta.oferente_contacto;
+      }
+      continue;
+    }
+    map.set(key, {
+      key,
+      nombre: m.oferta?.oferente_nombre || 'Ayuda emparejada',
+      contacto: m.oferta?.oferente_contacto ?? null,
+      matches: [m],
+    });
+  }
+  return [...map.values()].sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es')
+  );
 }
