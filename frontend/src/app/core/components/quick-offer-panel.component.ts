@@ -9,7 +9,7 @@ import { loadDonorProfile, saveDonorProfile } from '../utils/donor-profile';
   template: `
     @if (done()) {
       <div class="public-quick-offer-done">
-        ✓ Oferta enviada. Coordinación te contactará para coordinar la entrega.
+        ✓ Aporte registrado. El albergue te llamará para coordinar la entrega.
       </div>
     } @else if (open()) {
       <div class="public-quick-offer">
@@ -212,6 +212,7 @@ export class QuickOfferPanelComponent {
 
     this.ofertasApi
       .createPublic({
+        necesidad_id: n.id,
         oferente_nombre: nombre,
         oferente_contacto: contacto,
         municipio_preferido: this.municipio(),

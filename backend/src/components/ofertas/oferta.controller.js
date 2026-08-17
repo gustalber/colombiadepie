@@ -1,28 +1,59 @@
 const Oferta = require('./oferta.model');
 const OfertaItem = require('./oferta-item.model');
+const Emparejamiento = require('../emparejamientos/emparejamiento.model');
 const sequelize = require('../../config/database');
 const ofertaRepository = require('./oferta.repository');
+const necesidadRepository = require('../necesidades/necesidad.repository');
+const puntoDemandaRepository = require('../puntos-demanda/punto-demanda.repository');
 const { withFreshness, withFreshnessList } = require('../../utils/freshness');
 const {
   sanitizeForViewer,
   sanitizeListForViewer,
 } = require('../../utils/privacy');
+const {
+  puntoVerificationError,
+  necesidadVerificationError,
+} = require('../../utils/verification');
+const {
+  resolveMatchQty,
+  reserveOnCreate,
+  refreshNecesidadEstado,
+} = require('../../utils/match-reservation');
 
 const { CATEGORIAS: VALID_CATEGORIAS } = require('../../constants/categorias');
 const VALID_ESTADOS = ['disponible', 'comprometida', 'entregada'];
 
 class OfertaController {
   async createPublic(req, res) {
+    const header = this.#pickHeaderFields(req.body);
+    const items = this.#normalizeItems(req.body);
+    const necesidadId = req.body.necesidad_id
+      ? String(req.body.necesidad_id).trim()
+      : null;
+
+    const validationError = this.#validateCreate(header, items, {
+      necesidadId,
+    });
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    let necesidad = null;
+    if (necesidadId) {
+      const quickOfferResult = await this.#validateQuickOfferTarget(
+        necesidadId,
+        items[0]
+      );
+      if (quickOfferResult.error) {
+        return res.status(quickOfferResult.status || 400).json({
+          error: quickOfferResult.error,
+        });
+      }
+      necesidad = quickOfferResult.necesidad;
+    }
+
     const tx = await sequelize.transaction();
     try {
-      const header = this.#pickHeaderFields(req.body);
-      const items = this.#normalizeItems(req.body);
-      const validationError = this.#validateCreate(header, items);
-      if (validationError) {
-        await tx.rollback();
-        return res.status(400).json({ error: validationError });
-      }
-
       const oferta = await Oferta.create(
         {
           ...header,
@@ -31,7 +62,7 @@ class OfertaController {
         { transaction: tx }
       );
 
-      await OfertaItem.bulkCreate(
+      const createdItems = await OfertaItem.bulkCreate(
         items.map((item) => ({
           ...item,
           oferta_id: oferta.id,
@@ -40,7 +71,25 @@ class OfertaController {
         { transaction: tx }
       );
 
+      if (necesidad) {
+        const item = createdItems[0];
+        const matchCantidad = resolveMatchQty(necesidad.cantidad, item.cantidad);
+        await Emparejamiento.create(
+          {
+            necesidad_id: necesidad.id,
+            oferta_id: oferta.id,
+            oferta_item_id: item.id,
+            cantidad: matchCantidad,
+            estado: 'confirmado',
+          },
+          { transaction: tx }
+        );
+        await reserveOnCreate(necesidad, item, matchCantidad, { transaction: tx });
+        await refreshNecesidadEstado(necesidad.id, null, { transaction: tx });
+      }
+
       await tx.commit();
+      await ofertaRepository.refreshEstado(oferta.id);
 
       const created = await ofertaRepository.findById(oferta.id);
       return res.status(201).json({
@@ -234,9 +283,15 @@ class OfertaController {
     return [];
   }
 
-  #validateCreate(header, items) {
+  #validateCreate(header, items, options = {}) {
     if (!header.oferente_nombre || !String(header.oferente_nombre).trim()) {
       return 'El nombre del oferente es obligatorio';
+    }
+    if (
+      options.necesidadId &&
+      (!header.oferente_contacto || !String(header.oferente_contacto).trim())
+    ) {
+      return 'Indica tu teléfono o WhatsApp para que el albergue te contacte';
     }
     if (
       !header.municipio_preferido ||
@@ -246,6 +301,9 @@ class OfertaController {
     }
     if (!items.length) {
       return 'Agrega al menos una categoría a donar';
+    }
+    if (options.necesidadId && items.length !== 1) {
+      return 'Yo aporto solo puede registrar una categoría a la vez';
     }
 
     const seen = new Set();
@@ -263,8 +321,58 @@ class OfertaController {
       if (item.cantidad != null && Number(item.cantidad) < 0) {
         return 'La cantidad no puede ser negativa';
       }
+      if (options.necesidadId && (item.cantidad == null || Number(item.cantidad) <= 0)) {
+        return 'Indica cuánto puedes aportar';
+      }
     }
     return null;
+  }
+
+  async #validateQuickOfferTarget(necesidadId, item) {
+    const necesidad = await necesidadRepository.findById(necesidadId);
+    if (!necesidad) {
+      return { status: 404, error: 'Necesidad no encontrada' };
+    }
+
+    const necesidadError = necesidadVerificationError(necesidad);
+    if (necesidadError) {
+      return { status: 409, error: necesidadError };
+    }
+
+    const punto = await puntoDemandaRepository.findById(necesidad.punto_id);
+    const puntoError = puntoVerificationError(punto);
+    if (puntoError) {
+      return { status: 409, error: puntoError };
+    }
+
+    if (necesidad.estado === 'cubierta') {
+      return { status: 409, error: 'Esta necesidad ya está cubierta' };
+    }
+
+    if (necesidad.categoria !== item.categoria) {
+      return {
+        status: 400,
+        error: 'La categoría del aporte no coincide con la necesidad',
+      };
+    }
+
+    if (necesidad.cantidad != null && Number(necesidad.cantidad) <= 0) {
+      return {
+        status: 409,
+        error: 'Esta necesidad ya no tiene cantidad pendiente',
+      };
+    }
+
+    if (item.cantidad != null && necesidad.cantidad != null) {
+      if (Number(item.cantidad) > Number(necesidad.cantidad)) {
+        return {
+          status: 400,
+          error: `El albergue necesita como máximo ${necesidad.cantidad} ${necesidad.unidad || ''}`.trim(),
+        };
+      }
+    }
+
+    return { necesidad };
   }
 }
 

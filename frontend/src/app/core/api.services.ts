@@ -156,6 +156,7 @@ export class OfertasApiService {
 
   createPublic(
     body: Omit<Partial<Oferta>, 'items'> & {
+      necesidad_id?: string;
       items: Array<
         Pick<OfertaItem, 'categoria'> &
           Partial<Pick<OfertaItem, 'cantidad' | 'unidad' | 'descripcion'>>

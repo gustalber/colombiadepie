@@ -19,6 +19,22 @@ export function timeAgo(isoDate: string | null | undefined): string {
   return `hace ${days} días`;
 }
 
+/** Absolute date/time for audit-style labels (es-CO). */
+export function formatDateTime(isoDate: string | null | undefined): string {
+  if (!isoDate) return 'sin fecha';
+
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return 'sin fecha';
+
+  return date.toLocaleString('es-CO', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export function cupoLabel(
   ocupacion: number | null | undefined,
   capacidad: number | null | undefined

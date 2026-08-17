@@ -33,6 +33,7 @@ import {
   TIPO_PUNTO_LABELS,
   URGENCIA_LABELS,
   categoriaIcon,
+  formatDateTime,
   timeAgo,
 } from '../../core/utils/labels';
 import { ShellComponent } from '../../layout/shell.component';
@@ -177,8 +178,8 @@ interface DonorMatchGroup {
                     <span>Pulsa «Yo aporto» en lo que tengas disponible.</span>
                   </li>
                   <li>
-                    <strong>Coordinación te escribe</strong>
-                    <span>Con tu teléfono acordamos entrega al albergue.</span>
+                    <strong>El albergue te llama</strong>
+                    <span>Con tu teléfono acordáis cuándo y cómo entregar.</span>
                   </li>
                   <li>
                     <strong>Llevas la ayuda</strong>
@@ -530,14 +531,19 @@ interface DonorMatchGroup {
                       <ul class="donor-offer-lines">
                         @for (opt of g.items; track opt.item.id) {
                           <li>
-                            <span class="donor-offer-cat">{{ categoriaLabel(opt.item.categoria) }}</span>
-                            <span class="donor-offer-qty">
-                              @if (opt.item.cantidad != null) {
-                                {{ opt.item.cantidad }} {{ opt.item.unidad || '' }}
-                              } @else {
-                                Cantidad sin especificar
-                              }
-                            </span>
+                            <div class="donor-offer-line-main">
+                              <span class="donor-offer-cat">{{ categoriaLabel(opt.item.categoria) }}</span>
+                              <span class="donor-offer-qty">
+                                @if (opt.item.cantidad != null) {
+                                  {{ opt.item.cantidad }} {{ opt.item.unidad || '' }}
+                                } @else {
+                                  Cantidad sin especificar
+                                }
+                              </span>
+                            </div>
+                            @if (offerItemDescripcion(opt.item); as desc) {
+                              <span class="donor-offer-desc">{{ desc }}</span>
+                            }
                           </li>
                         }
                       </ul>
@@ -715,7 +721,7 @@ interface DonorMatchGroup {
               <div>
                 <h2>Por recibir</h2>
                 <p>
-                  Ayuda emparejada hacia este albergue
+                  Personas que dijeron «Yo aporto» — llámalas para coordinar la entrega
                   @if (incomingHelp().length > 0) {
                     · {{ incomingByDonor().length }} persona(s),
                     {{ incomingHelp().length }} aporte(s)
@@ -736,28 +742,40 @@ interface DonorMatchGroup {
                     <div class="ops-donor-head">
                       <strong>{{ g.nombre }}</strong>
                       @if (g.contacto; as tel) {
-                        <a class="btn btn-ghost btn-sm" [href]="telHref(tel)">Llamar</a>
+                        <a class="btn btn-ghost btn-sm" [href]="telHref(tel)">Llamar · {{ tel }}</a>
                       }
                     </div>
                     <div class="ops-donor-items">
                       @for (m of g.matches; track m.id) {
                         <article class="ops-arrival ops-arrival-nested" [class.ready]="m.estado === 'en_camino'">
-                          <div class="ops-arrival-body">
+                          <div class="ops-arrival-main">
                             <div class="ops-arrival-top">
                               <span class="tag" [class]="m.estado === 'en_camino' ? 'media' : ''">
                                 {{ matchEstadoLabel(m.estado) }}
                               </span>
                               <span class="ops-arrival-cat">{{ categoriaLabel(m.necesidad?.categoria || '') }}</span>
                             </div>
-                            <div class="ops-row-meta">
+                            @if (matchDescripcion(m); as desc) {
+                              <div class="ops-match-desc ops-match-desc-prominent">{{ desc }}</div>
+                            }
+                            <div class="ops-arrival-details">
                               @if (matchQtyLabel(m); as qty) {
-                                {{ qty }}
+                                <span>{{ qty }}</span>
+                              }
+                              <span [title]="formatDateTime(m.created_at)">
+                                {{ matchConfirmedLabel(m) }}
+                              </span>
+                              @if (m.estado === 'en_camino') {
+                                <span [title]="formatDateTime(m.updated_at)">
+                                  En camino {{ timeAgo(m.updated_at) }}
+                                </span>
                               }
                               @if (m.eta) {
-                                · Llega: {{ m.eta }}
+                                <span>Llega: {{ m.eta }}</span>
                               }
                             </div>
                           </div>
+                          <div class="ops-arrival-actions">
                           @if (canConfirmDelivery() && m.estado === 'en_camino') {
                             <button
                               class="btn btn-primary btn-sm"
@@ -778,6 +796,7 @@ interface DonorMatchGroup {
                               Ya va en camino
                             </button>
                           }
+                          </div>
                         </article>
                       }
                     </div>
@@ -939,7 +958,23 @@ interface DonorMatchGroup {
                             @if (matchQtyLabel(m); as qty) {
                               · {{ qty }}
                             }
-                            · {{ timeAgo(m.updated_at) }}
+                          </div>
+                          @if (matchDescripcion(m); as desc) {
+                            <div class="ops-match-desc ops-match-desc-prominent">{{ desc }}</div>
+                          }
+                          <div class="ops-arrival-details">
+                            <span [title]="formatDateTime(m.created_at)">
+                              Confirmado {{ timeAgo(m.created_at) }}
+                            </span>
+                            @if (m.estado === 'entregado') {
+                              <span [title]="formatDateTime(m.updated_at)">
+                                Entregado {{ timeAgo(m.updated_at) }}
+                              </span>
+                            } @else if (m.estado === 'cancelado') {
+                              <span [title]="formatDateTime(m.updated_at)">
+                                Cancelado {{ timeAgo(m.updated_at) }}
+                              </span>
+                            }
                           </div>
                           @if (m.evidencias?.length) {
                             <div class="evidence-grid compact">
@@ -1464,11 +1499,22 @@ interface DonorMatchGroup {
         gap: 0.25rem;
       }
       .donor-offer-lines li {
+        display: grid;
+        gap: 0.15rem;
+        font-size: 0.88rem;
+      }
+      .donor-offer-line-main {
         display: flex;
         flex-wrap: wrap;
         justify-content: space-between;
         gap: 0.35rem;
-        font-size: 0.88rem;
+      }
+      .donor-offer-desc,
+      .ops-match-desc,
+      .ops-match-dates {
+        font-size: 0.85rem;
+        color: var(--ink-soft);
+        line-height: 1.35;
       }
       .donor-offer-cat {
         font-weight: 700;
@@ -1557,6 +1603,32 @@ interface DonorMatchGroup {
         margin: 0;
         padding: 0.75rem 0.85rem;
         border-radius: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 0.65rem 1rem;
+        align-items: start;
+      }
+      .ops-arrival-main {
+        min-width: 0;
+      }
+      .ops-match-desc-prominent {
+        font-size: 0.96rem;
+        font-weight: 600;
+        color: var(--ink);
+        margin: 0.2rem 0 0.35rem;
+      }
+      .ops-arrival-details {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem 0.75rem;
+        font-size: 0.85rem;
+        color: var(--ink-soft);
+      }
+      .ops-arrival-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        flex-shrink: 0;
       }
       .ops-arrival-nested:first-child {
         border-top: 0;
@@ -1627,6 +1699,12 @@ interface DonorMatchGroup {
         .match-bar .btn {
           width: 100%;
         }
+        .ops-arrival-nested {
+          grid-template-columns: 1fr;
+        }
+        .ops-arrival-actions .btn {
+          width: 100%;
+        }
       }
     `,
   ],
@@ -1683,6 +1761,7 @@ export class PuntoDetailPageComponent implements OnInit {
   });
 
   readonly timeAgo = timeAgo;
+  readonly formatDateTime = formatDateTime;
 
   readonly publicOpenNeeds = computed(() => {
     const needs = (this.punto()?.necesidades || []).filter(
@@ -2409,11 +2488,27 @@ export class PuntoDetailPageComponent implements OnInit {
 
   matchQtyLabel(m: Emparejamiento): string | null {
     const qty = m.cantidad != null ? m.cantidad : null;
-    if (qty == null) {
-      return m.oferta_item?.descripcion || null;
-    }
+    if (qty == null) return null;
     const unit = m.oferta_item?.unidad || m.necesidad?.unidad || '';
     return `${qty} ${unit}`.trim();
+  }
+
+  matchDescripcion(m: Emparejamiento): string | null {
+    const fromNeed = m.necesidad?.descripcion?.trim();
+    if (fromNeed) return fromNeed;
+    const fromItem = m.oferta_item?.descripcion?.trim();
+    return fromItem || null;
+  }
+
+  matchConfirmedLabel(m: Emparejamiento): string {
+    if (m.estado === 'propuesto') {
+      return `Propuesto ${timeAgo(m.created_at)}`;
+    }
+    return `Confirmado ${timeAgo(m.created_at)}`;
+  }
+
+  offerItemDescripcion(item: OfertaItem): string | null {
+    return item.descripcion?.trim() || null;
   }
 
   mediaUrl(path: string): string {

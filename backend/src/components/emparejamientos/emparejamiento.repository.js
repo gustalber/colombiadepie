@@ -85,7 +85,7 @@ class EmparejamientoRepository {
     return Emparejamiento.count({ where });
   }
 
-  async countActiveByNecesidadId(necesidadId, excludeId = null) {
+  async countActiveByNecesidadId(necesidadId, excludeId = null, options = {}) {
     const where = {
       necesidad_id: necesidadId,
       estado: { [Op.notIn]: ['cancelado', 'entregado'] },
@@ -93,7 +93,7 @@ class EmparejamientoRepository {
     if (excludeId) {
       where.id = { [Op.ne]: excludeId };
     }
-    return Emparejamiento.count({ where });
+    return Emparejamiento.count({ where, ...options });
   }
 }
 

@@ -9,6 +9,11 @@ const {
   puntoVerificationError,
   necesidadVerificationError,
 } = require('../../utils/verification');
+const {
+  resolveMatchQty,
+  reserveOnCreate,
+  refreshNecesidadEstado,
+} = require('../../utils/match-reservation');
 
 const VALID_ESTADOS = [
   'propuesto',
@@ -19,21 +24,6 @@ const VALID_ESTADOS = [
 ];
 
 const ACTIVE_MATCH_ESTADOS = ['propuesto', 'confirmado', 'en_camino'];
-
-function resolveMatchQty(needQty, offerQty) {
-  const need =
-    needQty === '' || needQty == null ? null : Number(needQty);
-  const offer =
-    offerQty === '' || offerQty == null ? null : Number(offerQty);
-
-  if (need != null && Number.isNaN(need)) return null;
-  if (offer != null && Number.isNaN(offer)) return null;
-
-  if (need == null && offer == null) return null;
-  if (need == null) return offer;
-  if (offer == null) return need;
-  return Math.min(need, offer);
-}
 
 class EmparejamientoController {
   async list(req, res) {
@@ -218,8 +208,8 @@ class EmparejamientoController {
         eta: eta || null,
       });
 
-      await this.#reserveOnCreate(necesidad, item, matchCantidad);
-      await this.#refreshNecesidadEstado(necesidad_id);
+      await reserveOnCreate(necesidad, item, matchCantidad);
+      await refreshNecesidadEstado(necesidad_id);
       await ofertaRepository.refreshEstado(item.oferta_id);
 
       const created = await emparejamientoRepository.findById(match.id);
@@ -329,30 +319,6 @@ class EmparejamientoController {
     }
   }
 
-  async #reserveOnCreate(necesidad, item, matchCantidad) {
-    if (matchCantidad != null && necesidad.cantidad != null) {
-      const remaining = Math.max(0, Number(necesidad.cantidad) - matchCantidad);
-      await necesidadRepository.update(necesidad.id, { cantidad: remaining });
-    }
-
-    if (matchCantidad != null && item.cantidad != null) {
-      const left = Math.max(0, Number(item.cantidad) - matchCantidad);
-      if (left > 0) {
-        await ofertaItemRepository.update(item.id, {
-          cantidad: left,
-          estado: 'disponible',
-        });
-      } else {
-        await ofertaItemRepository.update(item.id, {
-          cantidad: 0,
-          estado: 'comprometida',
-        });
-      }
-    } else {
-      await ofertaItemRepository.update(item.id, { estado: 'comprometida' });
-    }
-  }
-
   async #releaseReservation(match) {
     const qty =
       match.cantidad == null || match.cantidad === ''
@@ -395,37 +361,6 @@ class EmparejamientoController {
     }
   }
 
-  async #refreshNecesidadEstado(necesidadId, excludeMatchId = null) {
-    const necesidad = await necesidadRepository.findById(necesidadId);
-    if (!necesidad || necesidad.estado === 'cubierta') return;
-
-    const activeCount =
-      await emparejamientoRepository.countActiveByNecesidadId(
-        necesidadId,
-        excludeMatchId
-      );
-
-    if (necesidad.cantidad != null) {
-      if (Number(necesidad.cantidad) > 0) {
-        await necesidadRepository.update(necesidadId, { estado: 'abierta' });
-        return;
-      }
-      if (activeCount > 0) {
-        await necesidadRepository.update(necesidadId, { estado: 'en_camino' });
-        return;
-      }
-      await necesidadRepository.update(necesidadId, { estado: 'cubierta' });
-      return;
-    }
-
-    // Sin cantidad explícita: comportamiento clásico todo-o-nada
-    if (activeCount > 0) {
-      await necesidadRepository.update(necesidadId, { estado: 'en_camino' });
-    } else {
-      await necesidadRepository.update(necesidadId, { estado: 'abierta' });
-    }
-  }
-
   async #syncRelatedStates(match, previousEstado) {
     if (!match) return;
 
@@ -437,7 +372,7 @@ class EmparejamientoController {
 
     if (estado === 'cancelado' && wasActive) {
       await this.#releaseReservation(match);
-      await this.#refreshNecesidadEstado(match.necesidad_id, match.id);
+      await refreshNecesidadEstado(match.necesidad_id, match.id);
       if (ofertaId) await ofertaRepository.refreshEstado(ofertaId);
       return;
     }
@@ -470,7 +405,7 @@ class EmparejamientoController {
       const necesidad = await necesidadRepository.findById(match.necesidad_id);
       if (necesidad) {
         if (necesidad.cantidad != null) {
-          await this.#refreshNecesidadEstado(match.necesidad_id, match.id);
+          await refreshNecesidadEstado(match.necesidad_id, match.id);
         } else {
           // sin cantidad: una entrega cierra la necesidad
           await necesidadRepository.update(match.necesidad_id, {
@@ -482,7 +417,7 @@ class EmparejamientoController {
     }
 
     if (isActive) {
-      await this.#refreshNecesidadEstado(match.necesidad_id);
+      await refreshNecesidadEstado(match.necesidad_id);
       if (ofertaId) await ofertaRepository.refreshEstado(ofertaId);
     }
   }
